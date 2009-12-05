@@ -1578,6 +1578,32 @@ SYSCALL_DEFINE5(prctl, int, option, unsigned long, arg2, unsigned long, arg3,
 			else
 				error = PR_MCE_KILL_DEFAULT;
 			break;
+		case PR_SET_PROCTITLE_AREA: {
+			struct mm_struct *mm = current->mm;
+			unsigned long start = arg2;
+			unsigned long len = arg3;
+			unsigned long end = start + len;
+
+			if (len > PAGE_SIZE)
+				return -EINVAL;
+
+			/*
+			 * If the process pass broken pointer, EFAULT is might better
+			 * than ps output zero-length proctitle. Plus if
+			 * the process pass kernel address (or something-else),
+			 * We have to block it. Oherwise, strange exploit
+			 * chance is there.
+			 */
+			if (!access_ok(VERIFY_READ, start, len))
+				return -EFAULT;
+
+			down_write(&mm->mmap_sem);
+			mm->arg_start = start;
+			mm->arg_end = end;
+			up_write(&mm->mmap_sem);
+
+			return 0;
+		}
 		default:
 			error = -EINVAL;
 			break;

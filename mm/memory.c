@@ -3273,22 +3273,13 @@ int generic_access_phys(struct vm_area_struct *vma, unsigned long addr,
 }
 #endif
 
-/*
- * Access another process' address space.
- * Source/target buffer must be kernel space,
- * Do not walk the page table directly, use get_user_pages
- */
-int access_process_vm(struct task_struct *tsk, unsigned long addr, void *buf, int len, int write)
+/* Similar to access_process_vm(), but mmap_sem held is required. */
+int access_process_vm_locked(struct task_struct *tsk, struct mm_struct *mm,
+			     unsigned long addr, void *buf, int len, int write)
 {
-	struct mm_struct *mm;
 	struct vm_area_struct *vma;
 	void *old_buf = buf;
 
-	mm = get_task_mm(tsk);
-	if (!mm)
-		return 0;
-
-	down_read(&mm->mmap_sem);
 	/* ignore errors, just check how much was successfully transferred */
 	while (len) {
 		int bytes, ret, offset;
@@ -3335,10 +3326,33 @@ int access_process_vm(struct task_struct *tsk, unsigned long addr, void *buf, in
 		buf += bytes;
 		addr += bytes;
 	}
+
+	return buf - old_buf;
+}
+
+/*
+ * Access another process' address space.
+ * Source/target buffer must be kernel space,
+ * Do not walk the page table directly, use get_user_pages
+ * ignore errors, just check how much was successfully transferred. IOW, this
+ * function always return >=0 value.
+ */
+int access_process_vm(struct task_struct *tsk, unsigned long addr, void *buf, int len, int write)
+{
+	int ret;
+	struct mm_struct *mm;
+
+	/* Probably tsk isn't current. We can't access tsk->mm directly. */
+	mm = get_task_mm(tsk);
+	if (!mm)
+		return 0;
+
+	down_read(&mm->mmap_sem);
+	ret = access_process_vm_locked(tsk, mm, addr, buf, len, write);
 	up_read(&mm->mmap_sem);
 	mmput(mm);
 
-	return buf - old_buf;
+	return ret;
 }
 
 /*
