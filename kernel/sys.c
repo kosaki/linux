@@ -146,13 +146,13 @@ out:
 
 SYSCALL_DEFINE3(setpriority, int, which, int, who, int, niceval)
 {
-	struct task_struct *g, *p;
+	struct task_struct *g, *p, *t;
 	struct user_struct *user;
 	const struct cred *cred = current_cred();
 	int error = -EINVAL;
 	struct pid *pgrp;
 
-	if (which > PRIO_USER || which < PRIO_PROCESS)
+	if (which > PRIO_PROCESS || which < PRIO_THREAD)
 		goto out;
 
 	/* normalize: avoid signed division (rounding problems) */
@@ -165,7 +165,7 @@ SYSCALL_DEFINE3(setpriority, int, which, int, who, int, niceval)
 	rcu_read_lock();
 	read_lock(&tasklist_lock);
 	switch (which) {
-		case PRIO_PROCESS:
+		case PRIO_THREAD:
 			if (who)
 				p = find_task_by_vpid(who);
 			else
@@ -197,6 +197,20 @@ SYSCALL_DEFINE3(setpriority, int, which, int, who, int, niceval)
 			if (who != cred->uid)
 				free_uid(user);		/* For find_user() */
 			break;
+		case PRIO_PROCESS:
+			if (who)
+				p = find_task_by_vpid(who);
+			else
+				p = current;
+			if (!p)
+				break;
+
+			t = p;
+			do {
+				error = set_one_prio(t, niceval, error);
+				t = next_thread(t);
+			} while (t != p);
+			break;
 	}
 out_unlock:
 	read_unlock(&tasklist_lock);
@@ -219,17 +233,20 @@ SYSCALL_DEFINE2(getpriority, int, which, int, who)
 	long niceval, retval = -ESRCH;
 	struct pid *pgrp;
 
-	if (which > PRIO_USER || which < PRIO_PROCESS)
+	if (which > PRIO_PROCESS || which < PRIO_THREAD)
 		return -EINVAL;
 
 	read_lock(&tasklist_lock);
 	switch (which) {
 		case PRIO_PROCESS:
+		case PRIO_THREAD:
 			if (who)
 				p = find_task_by_vpid(who);
 			else
 				p = current;
 			if (p) {
+				if (which == PRIO_PROCESS)
+					p = p->group_leader;
 				niceval = 20 - task_nice(p);
 				if (niceval > retval)
 					retval = niceval;
