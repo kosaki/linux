@@ -487,8 +487,6 @@ SYSCALL_DEFINE2(mlock, unsigned long, start, size_t, len)
 	if (!can_do_mlock())
 		return -EPERM;
 
-	lru_add_drain_all();	/* flush pagevec */
-
 	down_write(&current->mm->mmap_sem);
 	len = PAGE_ALIGN(len + (start & ~PAGE_MASK));
 	start &= PAGE_MASK;
@@ -505,6 +503,7 @@ SYSCALL_DEFINE2(mlock, unsigned long, start, size_t, len)
 	up_write(&current->mm->mmap_sem);
 	if (!error)
 		error = do_mlock_pages(start, len, 0);
+	lru_add_drain_all_async();
 	return error;
 }
 
@@ -557,9 +556,6 @@ SYSCALL_DEFINE1(mlockall, int, flags)
 	if (!can_do_mlock())
 		goto out;
 
-	if (flags & MCL_CURRENT)
-		lru_add_drain_all();	/* flush pagevec */
-
 	down_write(&current->mm->mmap_sem);
 
 	lock_limit = rlimit(RLIMIT_MEMLOCK);
@@ -573,6 +569,7 @@ SYSCALL_DEFINE1(mlockall, int, flags)
 	if (!ret && (flags & MCL_CURRENT)) {
 		/* Ignore errors */
 		do_mlock_pages(0, TASK_SIZE, 1);
+		lru_add_drain_all_async();
 	}
 out:
 	return ret;

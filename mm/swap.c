@@ -569,6 +569,49 @@ int lru_add_drain_all(void)
 	return schedule_on_each_cpu(lru_add_drain_per_cpu);
 }
 
+static DEFINE_PER_CPU(struct work_struct, lru_drain_work);
+
+static int __init lru_drain_work_init(void)
+{
+	struct work_struct *work;
+	int cpu;
+
+	for_each_possible_cpu(cpu) {
+		work = &per_cpu(lru_drain_work, cpu);
+		INIT_WORK(work, &lru_add_drain_per_cpu);
+	}
+
+	return 0;
+}
+core_initcall(lru_drain_work_init);
+
+static bool has_pages_lru_pvecs(int cpu)
+{
+	struct pagevec *pvecs = per_cpu(lru_add_pvecs, cpu);
+	struct pagevec *pvec;
+	int lru;
+
+	for_each_lru(lru) {
+		pvec = &pvecs[lru - LRU_BASE];
+		if (pagevec_count(pvec))
+			return true;
+	}
+
+	return false;
+}
+
+void lru_add_drain_all_async(void)
+{
+	int cpu;
+
+	for_each_online_cpu(cpu) {
+		struct work_struct *work = &per_cpu(lru_drain_work, cpu);
+
+		if (has_pages_lru_pvecs(cpu))
+			schedule_work_on(cpu, work);
+	}
+}
+
 /*
  * Batched page_cache_release().  Decrement the reference count on all the
  * passed pages.  If it fell to zero then remove the page from the LRU and
@@ -704,10 +747,23 @@ static void ____pagevec_lru_add_fn(struct page *page, void *arg)
 	VM_BUG_ON(PageLRU(page));
 
 	SetPageLRU(page);
-	if (active)
-		SetPageActive(page);
-	update_page_reclaim_stat(zone, page, file, active);
-	add_page_to_lru_list(zone, page, lru);
+ redo:
+	if (page_evictable(page, NULL)) {
+		if (active)
+			SetPageActive(page);
+		update_page_reclaim_stat(zone, page, file, active);
+		add_page_to_lru_list(zone, page, lru);
+	} else {
+		SetPageUnevictable(page);
+		add_page_to_lru_list(zone, page, LRU_UNEVICTABLE);
+		smp_mb();
+
+		if (page_evictable(page, NULL)) {
+			del_page_from_lru_list(zone, page, LRU_UNEVICTABLE);
+			ClearPageUnevictable(page);
+			goto redo;
+		}
+	}
 }
 
 /*
