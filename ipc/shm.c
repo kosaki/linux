@@ -872,8 +872,6 @@ SYSCALL_DEFINE3(shmctl, int, shmid, int, cmd, struct shmid_ds __user *, buf)
 	{
 		struct file *uninitialized_var(shm_file);
 
-		lru_add_drain_all();  /* drain pagevecs to lru lists */
-
 		shp = shm_lock_check(ns, shmid);
 		if (IS_ERR(shp)) {
 			err = PTR_ERR(shp);
@@ -911,6 +909,8 @@ SYSCALL_DEFINE3(shmctl, int, shmid, int, cmd, struct shmid_ds __user *, buf)
 			shp->mlock_user = NULL;
 		}
 		shm_unlock(shp);
+		/* prevent user visible mismatch of unevictable accounting */
+		lru_add_drain_all_async();
 		goto out;
 	}
 	case IPC_RMID:
