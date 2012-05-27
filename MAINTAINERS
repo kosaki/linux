@@ -4463,6 +4463,13 @@ F:	drivers/mtd/
 F:	include/linux/mtd/
 F:	include/mtd/
 
+MEMPOLICY
+M:	KOSAKI Motohiro <kosaki.motohiro@jp.fujitsu.com>
+L:	linux-mm@kvack.org
+S:	Maintained
+F:	include/linux/mempolicy.h
+F:	mm/mempolicy.c
+
 MICROBLAZE ARCHITECTURE
 M:	Michal Simek <monstr@monstr.eu>
 L:	microblaze-uclinux@itee.uq.edu.au (moderated for non-subscribers)
