@@ -1524,18 +1524,29 @@ struct mempolicy *get_vma_policy(struct task_struct *task,
 		struct vm_area_struct *vma, unsigned long addr)
 {
 	struct mempolicy *pol = task->mempolicy;
+	int got_ref;
 
 	if (vma) {
 		if (vma->vm_ops && vma->vm_ops->get_policy) {
 			struct mempolicy *vpol = vma->vm_ops->get_policy(vma,
 									addr);
-			if (vpol)
+			if (vpol) {
 				pol = vpol;
+				got_ref = 1;
+			}
 		} else if (vma->vm_policy)
 			pol = vma->vm_policy;
 	}
 	if (!pol)
 		pol = &default_policy;
+
+	/*
+	 * shmem_alloc_page() passes MPOL_F_SHARED policy with vma->vm_ops=NULL.
+	 * Thus, we need to take additional ref for avoiding refcount imbalance.
+	 */
+	if (!got_ref && mpol_needs_cond_ref(pol))
+		mpol_get(pol);
+
 	return pol;
 }
 
