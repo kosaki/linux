@@ -2138,6 +2138,14 @@ static void sp_delete(struct shared_policy *sp, struct sp_node *n)
 	kmem_cache_free(sn_cache, n);
 }
 
+static void sp_node_init(struct sp_node *node, unsigned long start,
+			 unsigned long end, struct mempolicy *pol)
+{
+	node->start = start;
+	node->end = end;
+	node->policy = pol;
+}
+
 static struct sp_node *sp_alloc(unsigned long start, unsigned long end,
 				struct mempolicy *pol)
 {
@@ -2154,10 +2162,7 @@ static struct sp_node *sp_alloc(unsigned long start, unsigned long end,
 		return NULL;
 	}
 	newpol->flags |= MPOL_F_SHARED;
-
-	n->start = start;
-	n->end = end;
-	n->policy = newpol;
+	sp_node_init(n, start, end, newpol);
 
 	return n;
 }
@@ -2166,7 +2171,9 @@ static struct sp_node *sp_alloc(unsigned long start, unsigned long end,
 static int shared_policy_replace(struct shared_policy *sp, unsigned long start,
 				 unsigned long end, struct sp_node *new)
 {
+	int err;
 	struct sp_node *n, *new2 = NULL;
+	struct mempolicy *new2_pol = NULL;
 
 restart:
 	spin_lock(&sp->lock);
@@ -2182,16 +2189,16 @@ restart:
 		} else {
 			/* Old policy spanning whole new range. */
 			if (n->end > end) {
-				if (!new2) {
-					spin_unlock(&sp->lock);
-					new2 = sp_alloc(end, n->end, n->policy);
-					if (!new2)
-						return -ENOMEM;
-					goto restart;
-				}
-				n->end = start;
+				if (!new2)
+					goto alloc_new2;
+
+				*new2_pol = *n->policy;
+				atomic_set(&new2_pol->refcnt, 1);
+				sp_node_init(new2, n->end, end, new2_pol);
 				sp_insert(sp, new2);
+				n->end = start;
 				new2 = NULL;
+				new2_pol = NULL;
 				break;
 			} else
 				n->end = start;
@@ -2203,11 +2210,25 @@ restart:
 	if (new)
 		sp_insert(sp, new);
 	spin_unlock(&sp->lock);
-	if (new2) {
-		mpol_put(new2->policy);
-		kmem_cache_free(sn_cache, new2);
-	}
-	return 0;
+	err = 0;
+
+ err_out:
+	if (new2_pol)
+		mpol_put(new2_pol);
+        if (new2)
+                kmem_cache_free(sn_cache, new2);
+	return err;
+
+ alloc_new2:
+	spin_unlock(&sp->lock);
+	err = -ENOMEM;
+	new2 = kmem_cache_alloc(sn_cache, GFP_KERNEL);
+	if (!new2)
+		goto err_out;
+	new2_pol = kmem_cache_alloc(policy_cache, GFP_KERNEL);
+	if (!new2_pol)
+		goto err_out;
+	goto restart;
 }
 
 /**
