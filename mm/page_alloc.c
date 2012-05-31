@@ -4114,7 +4114,7 @@ static void __init find_usable_zone_for_movable(void)
  * zones within a node are in order of monotonic increases memory addresses
  */
 static void __meminit adjust_zone_range_for_zone_movable(int nid,
-					unsigned long zone_type,
+					enum zone_type zone_type,
 					unsigned long node_start_pfn,
 					unsigned long node_end_pfn,
 					unsigned long *zone_start_pfn,
