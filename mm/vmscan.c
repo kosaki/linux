@@ -1993,6 +1993,13 @@ static bool all_unreclaimable(struct zonelist *zonelist,
 			continue;
 		if (!cpuset_zone_allowed_hardwall(zone, GFP_KERNEL))
 			continue;
+
+		printk("%d: all_unreclaimable: zone=%s free=%ld all_unreclaimable=%d\n",
+		       zone->zone_pgdat->node_id,
+		       zone->name,
+		       zone_page_state(zone, NR_FREE_PAGES),
+		       zone->all_unreclaimable);
+
 		if (!zone->all_unreclaimable)
 			return false;
 	}
@@ -2101,12 +2108,16 @@ out:
 		return 0;
 
 	/* Aborted reclaim to try compaction? don't OOM, then */
-	if (aborted_reclaim)
+	if (aborted_reclaim) {
+		printk("aborted_reclaim\n");
 		return 1;
+	}
 
 	/* top priority shrink_zones still had more to do? don't OOM, then */
-	if (global_reclaim(sc) && !all_unreclaimable(zonelist, sc))
+	if (global_reclaim(sc) && !all_unreclaimable(zonelist, sc)) {
+//		printk("all_unreclaimable() = false\n");
 		return 1;
+	}
 
 	return 0;
 }
@@ -2494,12 +2505,25 @@ loop_again:
 				    !zone_watermark_ok_safe(zone, testorder,
 					high_wmark_pages(zone) + balance_gap,
 					end_zone, 0)) {
+
+				unsigned long nr_reclaimed_save = sc.nr_reclaimed;
+				unsigned long nr_reclaimed_save2;
 				shrink_zone(zone, &sc);
+				nr_reclaimed_save2 = sc.nr_reclaimed;
 
 				reclaim_state->reclaimed_slab = 0;
 				nr_slab = shrink_slab(&shrink, sc.nr_scanned, lru_pages);
 				sc.nr_reclaimed += reclaim_state->reclaimed_slab;
 				total_scanned += sc.nr_scanned;
+
+				if (nr_reclaimed_save == nr_reclaimed_save2) {
+					printk("%d %s balance_pgdat 0 rec: nr_slab=%d, scanned=%ld, pages=%ld\n",
+					       pgdat->node_id,
+					       zone->name,
+					       nr_slab,
+					       zone->pages_scanned,
+					       zone_reclaimable_pages(zone));
+				}
 
 				if (nr_slab == 0 && !zone_reclaimable(zone))
 					zone->all_unreclaimable = 1;
@@ -2596,6 +2620,7 @@ out:
 		if (sc.nr_reclaimed < SWAP_CLUSTER_MAX)
 			order = sc.order = 0;
 
+		printk("balance_pgdat loop_again\n");
 		goto loop_again;
 	}
 
@@ -2622,13 +2647,16 @@ out:
 
 			/* Would compaction fail due to lack of free memory? */
 			if (COMPACTION_BUILD &&
-			    compaction_suitable(zone, order) == COMPACT_SKIPPED)
+			    compaction_suitable(zone, order) == COMPACT_SKIPPED) {
+				printk("balance_pgdat loop_again2\n");
 				goto loop_again;
+			}
 
 			/* Confirm the zone is balanced for order-0 */
 			if (!zone_watermark_ok(zone, 0,
 					high_wmark_pages(zone), 0, 0)) {
 				order = sc.order = 0;
+				printk("balance_pgdat loop_again3\n");
 				goto loop_again;
 			}
 
@@ -2644,6 +2672,8 @@ out:
 		if (zones_need_compaction)
 			compact_pgdat(pgdat, order);
 	}
+
+	printk("balance_pgdat end prio=%d\n", sc.priority);
 
 	/*
 	 * Return the order we were reclaiming at so sleeping_prematurely()
@@ -2775,6 +2805,25 @@ static int kswapd(void *p)
 			order = new_order;
 			classzone_idx = new_classzone_idx;
 		} else {
+			printk("-> kswapd_try_to_sleep node=%d order=%u classzone=%d\n",
+				     pgdat->node_id, balanced_order, balanced_classzone_idx);
+			{
+				int i = 0;
+
+				for (i = 0; i < pgdat->nr_zones; i++) {
+					struct zone *zone = pgdat->node_zones + i;
+
+					printk("%d zone %s free=%ld, min=%ld, low=%ld, high=%ld all=%d\n",
+					       pgdat->node_id, zone->name,
+					       zone_page_state(zone, NR_FREE_PAGES),
+					       min_wmark_pages(zone),
+					       low_wmark_pages(zone),
+					       high_wmark_pages(zone),
+					       zone->all_unreclaimable);
+				}
+			}
+
+
 			kswapd_try_to_sleep(pgdat, balanced_order,
 						balanced_classzone_idx);
 			order = pgdat->kswapd_max_order;
@@ -2783,6 +2832,8 @@ static int kswapd(void *p)
 			new_classzone_idx = classzone_idx;
 			pgdat->kswapd_max_order = 0;
 			pgdat->classzone_idx = pgdat->nr_zones - 1;
+			printk("<- kswapd_try_to_sleep node=%d new_order=%lu new_classzone=%d\n",
+				     pgdat->node_id, new_order, new_classzone_idx);
 		}
 
 		ret = try_to_freeze();

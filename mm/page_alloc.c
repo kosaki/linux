@@ -637,6 +637,9 @@ static void free_pcppages_bulk(struct zone *zone, int count,
 	int batch_free = 0;
 	int to_free = count;
 
+	if (!count)
+		return;
+
 	spin_lock(&zone->lock);
 	zone->all_unreclaimable = 0;
 	zone->pages_scanned = 0;
@@ -2439,7 +2442,8 @@ rebalance:
 						pages_reclaimed)) {
 		/* Wait for some write requests to complete then retry */
 		wait_iff_congested(preferred_zone, BLK_RW_ASYNC, HZ/50);
-		goto rebalance;
+//		goto rebalance;
+		goto restart;
 	} else {
 		/*
 		 * High-order allocations do not necessarily loop after
