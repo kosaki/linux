@@ -252,6 +252,13 @@ void thread_group_cputimer(struct task_struct *tsk, struct task_cputime *times)
 		 * it.
 		 */
 		thread_group_cputime(tsk, &sum);
+
+
+		trace_printk("thread_group_cputimer sum=%lld, cputimer=%lld\n",
+			     sum.sum_exec_runtime,
+			     cputimer->cputime.sum_exec_runtime
+			);
+
 		raw_spin_lock_irqsave(&cputimer->lock, flags);
 		cputimer->running = 1;
 		update_gt_cputime(&cputimer->cputime, &sum);
@@ -285,6 +292,9 @@ static int cpu_clock_sample_group(const clockid_t which_clock,
 	case CPUCLOCK_SCHED:
 		thread_group_cputime(p, &cputime);
 		cpu->sched = cputime.sum_exec_runtime;
+		trace_printk("[%d] cpu_clock_sample_group %llu\n",
+		       smp_processor_id(),
+		       cpu->sched);
 		break;
 	}
 	return 0;
@@ -630,7 +640,14 @@ static int cpu_timer_sample_group(const clockid_t which_clock,
 		cpu->cpu = cputime.utime;
 		break;
 	case CPUCLOCK_SCHED:
-		cpu->sched = cputime.sum_exec_runtime + task_delta_exec(p);
+	{
+		unsigned long long delta = task_delta_exec(p);
+		trace_printk("cputime=%lld delta=%lld\n",
+			     cputime.sum_exec_runtime,
+			     delta);
+		cpu->sched = cputime.sum_exec_runtime + delta;
+	}
+
 		break;
 	}
 	return 0;
@@ -657,6 +674,7 @@ static int posix_cpu_timer_set(struct k_itimer *timer, int flags,
 	}
 
 	new_expires = timespec_to_sample(timer->it_clock, &new->it_value);
+	trace_printk("[%d] posix_cpu_timer_set new_expires %llu\n", smp_processor_id(), new_expires.sched);
 
 	read_lock(&tasklist_lock);
 	/*
@@ -1087,6 +1105,14 @@ static void check_process_timers(struct task_struct *tsk,
 			break;
 		}
 		tl->firing = 1;
+		{
+			struct task_cputime cputime;
+			thread_group_cputime(tsk, &cputime);
+			trace_printk("[%d] runtime (%lld) >= expires (%lld), time=%lld\n",
+				     smp_processor_id(),
+				     sum_sched_runtime, tl->expires.sched,
+				     cputime.sum_exec_runtime);
+		}
 		list_move_tail(&tl->entry, firing);
 	}
 
@@ -1422,6 +1448,21 @@ static int do_cpu_nanosleep(const clockid_t which_clock, int flags,
 				 */
 				posix_cpu_timer_del(&timer);
 				spin_unlock_irq(&timer.it_lock);
+
+				{
+#if 0
+					union cpu_time_count cpu;
+					cpu_timer_sample_group(timer.it_clock, current, &cpu);
+					trace_printk("nanosleep end %llu\n", cpu.sched);
+#endif
+					struct task_cputime cputime;
+					thread_group_cputime(current, &cputime);
+
+
+					trace_printk("[%d] nanosleep end %llu\n",
+					       smp_processor_id(),
+					       cputime.sum_exec_runtime);
+				}
 				return 0;
 			}
 

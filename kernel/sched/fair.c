@@ -674,6 +674,21 @@ __update_curr(struct cfs_rq *cfs_rq, struct sched_entity *curr,
 	schedstat_set(curr->statistics.exec_max,
 		      max((u64)delta_exec, curr->statistics.exec_max));
 
+#if 1
+	{
+		struct task_struct *tsk;
+		tsk = task_of(curr);
+		if (strncmp(tsk->comm, "cpuclock", 8) == 0) {
+			trace_printk("curr->sum=%lld delta_exec=%ld sum+delta=%lld timer=%lld from=%pf\n",
+				     curr->sum_exec_runtime, delta_exec,
+				     curr->sum_exec_runtime + delta_exec,
+				     tsk->signal->cputimer.cputime.sum_exec_runtime,
+				     __builtin_return_address(0)
+				);
+		}
+	}
+#endif
+
 	curr->sum_exec_runtime += delta_exec;
 	schedstat_add(cfs_rq, exec_clock, delta_exec);
 	delta_exec_weighted = calc_delta_fair(delta_exec, curr);

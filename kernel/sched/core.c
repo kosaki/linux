@@ -2669,7 +2669,10 @@ unsigned long long task_sched_runtime(struct task_struct *p)
 	u64 ns = 0;
 
 	rq = task_rq_lock(p, &flags);
+#if 0
 	ns = p->se.sum_exec_runtime + do_task_delta_exec(p, rq);
+#endif
+	ns = p->se.sum_exec_runtime;
 	task_rq_unlock(rq, p, &flags);
 
 	return ns;

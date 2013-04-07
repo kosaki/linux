@@ -225,6 +225,13 @@ static inline void account_group_exec_runtime(struct task_struct *tsk,
 	if (!cputimer->running)
 		return;
 
+	{
+		trace_printk("cputime.sum=%lld ns=%lld sum+ns=%lld from=%pf\n",
+			     cputimer->cputime.sum_exec_runtime, ns,
+			     cputimer->cputime.sum_exec_runtime + ns,
+			     __builtin_return_address(0)
+			);
+	}
 	raw_spin_lock(&cputimer->lock);
 	cputimer->cputime.sum_exec_runtime += ns;
 	raw_spin_unlock(&cputimer->lock);
