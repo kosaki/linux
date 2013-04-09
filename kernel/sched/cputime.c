@@ -277,7 +277,7 @@ static __always_inline bool steal_account_process_tick(void)
  * Accumulate raw cputime values of dead tasks (sig->[us]time) and live
  * tasks (sum on group iteration) belonging to @tsk's group.
  */
-void thread_group_cputime(struct task_struct *tsk, struct task_cputime *times)
+void thread_group_cputime(struct task_struct *tsk, bool add_delta, struct task_cputime *times)
 {
 	struct signal_struct *sig = tsk->signal;
 	cputime_t utime, stime;
@@ -297,7 +297,7 @@ void thread_group_cputime(struct task_struct *tsk, struct task_cputime *times)
 		task_cputime(t, &utime, &stime);
 		times->utime += utime;
 		times->stime += stime;
-		times->sum_exec_runtime += task_sched_runtime(t);
+		times->sum_exec_runtime += task_sched_runtime(t, add_delta);
 	} while_each_thread(tsk, t);
 out:
 	rcu_read_unlock();
@@ -628,7 +628,7 @@ void thread_group_cputime_adjusted(struct task_struct *p, cputime_t *ut, cputime
 {
 	struct task_cputime cputime;
 
-	thread_group_cputime(p, &cputime);
+	thread_group_cputime(p, true, &cputime);
 	cputime_adjust(&cputime, &p->signal->prev_cputime, ut, st);
 }
 #endif /* !CONFIG_VIRT_CPU_ACCOUNTING_NATIVE */

@@ -1841,7 +1841,7 @@ static inline void disable_sched_clock_irqtime(void) {}
 #endif
 
 extern unsigned long long
-task_sched_runtime(struct task_struct *task);
+task_sched_runtime(struct task_struct *task, bool add_delta);
 
 /* sched_exec is called by processes performing an exec */
 #ifdef CONFIG_SMP
@@ -2502,7 +2502,7 @@ static inline void current_clr_polling(void) { }
 /*
  * Thread group CPU time accounting.
  */
-void thread_group_cputime(struct task_struct *tsk, struct task_cputime *times);
+void thread_group_cputime(struct task_struct *tsk, bool add_delta, struct task_cputime *times);
 void thread_group_cputimer(struct task_struct *tsk, struct task_cputime *times);
 
 static inline void thread_group_cputime_init(struct signal_struct *sig)
