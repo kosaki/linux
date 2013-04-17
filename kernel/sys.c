@@ -193,6 +193,7 @@ SYSCALL_DEFINE3(setpriority, int, which, int, who, int, niceval)
 	read_lock(&tasklist_lock);
 	switch (which) {
 		case PRIO_PROCESS:
+		case PRIO_THREAD:
 			if (who)
 				p = find_task_by_vpid(who);
 			else
@@ -255,6 +256,7 @@ SYSCALL_DEFINE2(getpriority, int, which, int, who)
 	read_lock(&tasklist_lock);
 	switch (which) {
 		case PRIO_PROCESS:
+		case PRIO_THREAD:
 			if (who)
 				p = find_task_by_vpid(who);
 			else
