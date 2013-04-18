@@ -177,6 +177,7 @@ SYSCALL_DEFINE3(setpriority, int, which, int, who, int, niceval)
 	const struct cred *cred = current_cred();
 	int error = -EINVAL;
 	struct pid *pgrp;
+	struct pid *pid;
 	kuid_t uid;
 
 	if (which > PRIO_USER || which < PRIO_PROCESS)
@@ -200,6 +201,15 @@ SYSCALL_DEFINE3(setpriority, int, which, int, who, int, niceval)
 				p = current;
 			if (p)
 				error = set_one_prio(p, niceval, error);
+			break;
+		case PRIO_TGROUP:
+			if (who)
+				pid = find_vpid(who);
+			else
+				pid = task_pid(current);
+			do_each_pid_thread(pid, PIDTYPE_PID, p) {
+				error = set_one_prio(p, niceval, error);
+			} while_each_pid_thread(pid, PIDTYPE_PID, p);
 			break;
 		case PRIO_PGRP:
 			if (who)
@@ -247,6 +257,7 @@ SYSCALL_DEFINE2(getpriority, int, which, int, who)
 	const struct cred *cred = current_cred();
 	long niceval, retval = -ESRCH;
 	struct pid *pgrp;
+	struct pid *pid;
 	kuid_t uid;
 
 	if (which > PRIO_USER || which < PRIO_PROCESS)
@@ -266,6 +277,17 @@ SYSCALL_DEFINE2(getpriority, int, which, int, who)
 				if (niceval > retval)
 					retval = niceval;
 			}
+			break;
+		case PRIO_TGROUP:
+			if (who)
+				pid = find_vpid(who);
+			else
+				pid = task_pid(current);
+			do_each_pid_thread(pid, PIDTYPE_PID, p) {
+				niceval = 20 - task_nice(p);
+				if (niceval > retval)
+					retval = niceval;
+			} while_each_pid_thread(pid, PIDTYPE_PID, p);
 			break;
 		case PRIO_PGRP:
 			if (who)
