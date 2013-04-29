@@ -221,11 +221,10 @@ posix_cpu_clock_set(const clockid_t which_clock, const struct timespec *tp)
 }
 
 
-/*
- * Sample a per-thread clock for the given task.
- */
-static int cpu_clock_sample(const clockid_t which_clock, struct task_struct *p,
-			    union cpu_time_count *cpu)
+static int do_cpu_clock_timer_sample(const clockid_t which_clock,
+				     struct task_struct *p,
+				     bool add_delta,
+				     union cpu_time_count *cpu)
 {
 	switch (CPUCLOCK_WHICH(which_clock)) {
 	default:
@@ -237,10 +236,28 @@ static int cpu_clock_sample(const clockid_t which_clock, struct task_struct *p,
 		cpu->cpu = virt_ticks(p);
 		break;
 	case CPUCLOCK_SCHED:
-		cpu->sched = task_sched_runtime(p, true);
+		cpu->sched = task_sched_runtime(p, add_delta);
 		break;
 	}
 	return 0;
+}
+
+/*
+ * Sample a per-thread clock for the given task.
+ */
+static int cpu_clock_sample(const clockid_t which_clock, struct task_struct *p,
+			    union cpu_time_count *cpu)
+{
+	return do_cpu_clock_timer_sample(which_clock, p, true, cpu);
+}
+
+/*
+ * Sample a per-thread timer clock for the given task.
+ */
+static int cpu_timer_sample(const clockid_t which_clock, struct task_struct *p,
+			    union cpu_time_count *cpu)
+{
+	return do_cpu_clock_timer_sample(which_clock, p, false, cpu);
 }
 
 static void update_gt_cputime(struct task_cputime *a, struct task_cputime *b)
@@ -748,7 +765,7 @@ static int posix_cpu_timer_set(struct k_itimer *timer, int flags,
 	 * check if it's already passed.  In short, we need a sample.
 	 */
 	if (CPUCLOCK_PERTHREAD(timer->it_clock)) {
-		cpu_clock_sample(timer->it_clock, p, &val);
+		cpu_timer_sample(timer->it_clock, p, &val);
 	} else {
 		cpu_timer_sample_group(timer->it_clock, p, &val);
 	}
@@ -804,7 +821,7 @@ static int posix_cpu_timer_set(struct k_itimer *timer, int flags,
 		 * we need exact current time.
 		 */
 		if (CPUCLOCK_PERTHREAD(timer->it_clock))
-			now = val;
+			cpu_clock_sample(timer->it_clock, p, &now);
 		else
 			cpu_clock_sample_group(timer->it_clock, p, &now);
 		cpu_time_add(timer->it_clock, &new_expires, now);
@@ -894,7 +911,7 @@ static void posix_cpu_timer_get(struct k_itimer *timer, struct itimerspec *itp)
 	 * Sample the clock to take the difference with the expiry time.
 	 */
 	if (CPUCLOCK_PERTHREAD(timer->it_clock)) {
-		cpu_clock_sample(timer->it_clock, p, &now);
+		cpu_timer_sample(timer->it_clock, p, &now);
 		clear_dead = p->exit_state;
 	} else {
 		read_lock(&tasklist_lock);
@@ -1203,7 +1220,7 @@ void posix_cpu_timer_schedule(struct k_itimer *timer)
 	 * Fetch the current sample and update the timer's expiry time.
 	 */
 	if (CPUCLOCK_PERTHREAD(timer->it_clock)) {
-		cpu_clock_sample(timer->it_clock, p, &now);
+		cpu_timer_sample(timer->it_clock, p, &now);
 		bump_cpu_timer(timer, now);
 		if (unlikely(p->exit_state)) {
 			clear_dead_task(timer, now);
