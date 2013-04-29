@@ -652,7 +652,7 @@ static int cpu_timer_sample_group(const clockid_t which_clock,
 		cpu->cpu = cputime.utime;
 		break;
 	case CPUCLOCK_SCHED:
-		cpu->sched = cputime.sum_exec_runtime + task_delta_exec(p);
+		cpu->sched = cputime.sum_exec_runtime;
 		break;
 	}
 	return 0;
@@ -797,7 +797,17 @@ static int posix_cpu_timer_set(struct k_itimer *timer, int flags,
 	}
 
 	if (new_expires.sched != 0 && !(flags & TIMER_ABSTIME)) {
-		cpu_time_add(timer->it_clock, &new_expires, val);
+		union cpu_time_count now;
+
+		/*
+		 * The expires is "now + timeout" by definition. So,
+		 * we need exact current time.
+		 */
+		if (CPUCLOCK_PERTHREAD(timer->it_clock))
+			now = val;
+		else
+			cpu_clock_sample_group(timer->it_clock, p, &now);
+		cpu_time_add(timer->it_clock, &new_expires, now);
 	}
 
 	/*
