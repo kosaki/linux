@@ -2458,6 +2458,7 @@ static inline int spin_needbreak(spinlock_t *lock)
 #endif
 }
 
+void thread_cputime(struct task_struct *tsk, bool add_delta, struct task_cputime *times);
 /*
  * Idle thread specific functions to determine the need_resched
  * polling state. We have two versions, one based on TS_POLLING in

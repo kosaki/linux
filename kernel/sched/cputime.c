@@ -273,6 +273,17 @@ static __always_inline bool steal_account_process_tick(void)
 	return false;
 }
 
+void thread_cputime(struct task_struct *tsk, bool add_delta, struct task_cputime *times)
+{
+	struct signal_struct *sig = tsk->signal;
+	cputime_t utime, stime;
+
+	task_cputime(tsk, &utime, &stime);
+	times->utime = utime;
+	times->stime = stime;
+	times->sum_exec_runtime = task_sched_runtime(tsk, add_delta);
+}
+
 /*
  * Accumulate raw cputime values of dead tasks (sig->[us]time) and live
  * tasks (sum on group iteration) belonging to @tsk's group.

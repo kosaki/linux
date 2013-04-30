@@ -220,46 +220,6 @@ posix_cpu_clock_set(const clockid_t which_clock, const struct timespec *tp)
 	return error;
 }
 
-
-static int do_cpu_clock_timer_sample(const clockid_t which_clock,
-				     struct task_struct *p,
-				     bool add_delta,
-				     union cpu_time_count *cpu)
-{
-	switch (CPUCLOCK_WHICH(which_clock)) {
-	default:
-		return -EINVAL;
-	case CPUCLOCK_PROF:
-		cpu->cpu = prof_ticks(p);
-		break;
-	case CPUCLOCK_VIRT:
-		cpu->cpu = virt_ticks(p);
-		break;
-	case CPUCLOCK_SCHED:
-		cpu->sched = task_sched_runtime(p, add_delta);
-		break;
-	}
-	return 0;
-}
-
-/*
- * Sample a per-thread clock for the given task.
- */
-static int cpu_clock_sample(const clockid_t which_clock, struct task_struct *p,
-			    union cpu_time_count *cpu)
-{
-	return do_cpu_clock_timer_sample(which_clock, p, true, cpu);
-}
-
-/*
- * Sample a per-thread timer clock for the given task.
- */
-static int cpu_timer_sample(const clockid_t which_clock, struct task_struct *p,
-			    union cpu_time_count *cpu)
-{
-	return do_cpu_clock_timer_sample(which_clock, p, false, cpu);
-}
-
 static void update_gt_cputime(struct task_cputime *a, struct task_cputime *b)
 {
 	if (b->utime > a->utime)
@@ -301,34 +261,83 @@ void thread_group_cputimer(struct task_struct *tsk, struct task_cputime *times)
 }
 
 /*
- * Sample a process (thread group) clock for the given group_leader task.
- * Must be called with tasklist_lock held for reading.
+ * Sample time for the given task.
+ * @which_clock:	Clock id.
+ * @p:			Target task. Must be thread group leader when
+ *			thread_group is true.
+ * @thread_group:	True if want to get process time.
+ * @add_delta:		True if want to get clock time,
+ *			otherwise, get timer time.
  */
-static int cpu_clock_sample_group(const clockid_t which_clock,
-				  struct task_struct *p,
-				  union cpu_time_count *cpu)
+static int do_cpu_clock_timer_sample(const clockid_t which_clock,
+				     struct task_struct *p,
+				     bool thread_group,
+				     bool clock_time,
+				     union cpu_time_count *cpu)
 {
 	struct task_cputime cputime;
+
+	if (thread_group) {
+		if (clock_time)
+			thread_group_cputime(p, true, &cputime);
+		else
+			thread_group_cputimer(p, &cputime);
+	} else
+		thread_cputime(p, clock_time, &cputime);
 
 	switch (CPUCLOCK_WHICH(which_clock)) {
 	default:
 		return -EINVAL;
 	case CPUCLOCK_PROF:
-		thread_group_cputime(p, true, &cputime);
 		cpu->cpu = cputime.utime + cputime.stime;
 		break;
 	case CPUCLOCK_VIRT:
-		thread_group_cputime(p, true, &cputime);
 		cpu->cpu = cputime.utime;
 		break;
 	case CPUCLOCK_SCHED:
-		thread_group_cputime(p, true, &cputime);
 		cpu->sched = cputime.sum_exec_runtime;
 		break;
 	}
 	return 0;
 }
 
+/*
+ * Sample a per-thread clock time for the given task.
+ */
+static int cpu_clock_sample(const clockid_t which_clock, struct task_struct *p,
+			    union cpu_time_count *cpu)
+{
+	return do_cpu_clock_timer_sample(which_clock, p, false, true, cpu);
+}
+
+/*
+ * Sample a per-process clock time for the given task.
+ */
+static int cpu_clock_sample_group(const clockid_t which_clock,
+				  struct task_struct *p,
+				  union cpu_time_count *cpu)
+{
+	return do_cpu_clock_timer_sample(which_clock, p, true, true, cpu);
+}
+
+/*
+ * Sample a per-thread timer time for the given task.
+ */
+static int cpu_timer_sample(const clockid_t which_clock, struct task_struct *p,
+			    union cpu_time_count *cpu)
+{
+	return do_cpu_clock_timer_sample(which_clock, p, false, false, cpu);
+}
+
+/*
+ * Sample a per-process timer time for the given task.
+ */
+static int cpu_timer_sample_group(const clockid_t which_clock,
+				  struct task_struct *p,
+				  union cpu_time_count *cpu)
+{
+	return do_cpu_clock_timer_sample(which_clock, p, true, false, cpu);
+}
 
 static int posix_cpu_clock_get(const clockid_t which_clock, struct timespec *tp)
 {
@@ -646,33 +655,6 @@ static void cpu_timer_fire(struct k_itimer *timer)
 		 */
 		posix_cpu_timer_schedule(timer);
 	}
-}
-
-/*
- * Sample a process (thread group) timer for the given group_leader task.
- * Must be called with tasklist_lock held for reading.
- */
-static int cpu_timer_sample_group(const clockid_t which_clock,
-				  struct task_struct *p,
-				  union cpu_time_count *cpu)
-{
-	struct task_cputime cputime;
-
-	thread_group_cputimer(p, &cputime);
-	switch (CPUCLOCK_WHICH(which_clock)) {
-	default:
-		return -EINVAL;
-	case CPUCLOCK_PROF:
-		cpu->cpu = cputime.utime + cputime.stime;
-		break;
-	case CPUCLOCK_VIRT:
-		cpu->cpu = cputime.utime;
-		break;
-	case CPUCLOCK_SCHED:
-		cpu->sched = cputime.sum_exec_runtime;
-		break;
-	}
-	return 0;
 }
 
 #ifdef CONFIG_NO_HZ_FULL
