@@ -339,6 +339,18 @@ static int cpu_timer_sample_group(const clockid_t which_clock,
 	return do_cpu_clock_timer_sample(which_clock, p, true, false, cpu);
 }
 
+static union cpu_time_count cpu_clock_resolution(clockid_t cpuid)
+{
+	union cpu_time_count ret;
+
+	if (CPUCLOCK_WHICH(cpuid) == CPUCLOCK_SCHED)
+		ret.sched = 1;
+	else
+		ret.cpu = cputime_one_jiffy;
+
+	return ret;
+}
+
 static int posix_cpu_clock_get(const clockid_t which_clock, struct timespec *tp)
 {
 	const pid_t pid = CPUCLOCK_PID(which_clock);
@@ -806,7 +818,15 @@ static int posix_cpu_timer_set(struct k_itimer *timer, int flags,
 			cpu_clock_sample(timer->it_clock, p, &now);
 		else
 			cpu_clock_sample_group(timer->it_clock, p, &now);
+
 		cpu_time_add(timer->it_clock, &new_expires, now);
+
+		/*
+		 * When inaccurate timer, we need to adjust an expire time
+		 * because "now" may point to slightly past time.
+		 */
+		cpu_time_add(timer->it_clock, &new_expires,
+			     cpu_clock_resolution(timer->it_clock));
 	}
 
 	/*
