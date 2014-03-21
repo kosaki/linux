@@ -667,7 +667,7 @@ static void lru_deactivate_fn(struct page *page, struct lruvec *lruvec,
 		return;
 
 	/* Some processes are using the page */
-	if (page_mapped(page))
+	if (!PageAnon(page) && page_mapped(page))
 		return;
 
 	active = PageActive(page);
@@ -677,7 +677,7 @@ static void lru_deactivate_fn(struct page *page, struct lruvec *lruvec,
 	del_page_from_lru_list(page, lruvec, lru + active);
 	ClearPageActive(page);
 	ClearPageReferenced(page);
-	add_page_to_lru_list(page, lruvec, lru);
+
 
 	if (PageWriteback(page) || PageDirty(page)) {
 		/*
@@ -686,12 +686,13 @@ static void lru_deactivate_fn(struct page *page, struct lruvec *lruvec,
 		 * is _really_ small and  it's non-critical problem.
 		 */
 		SetPageReclaim(page);
+		add_page_to_lru_list(page, lruvec, lru);
 	} else {
 		/*
 		 * The page's writeback ends up during pagevec
 		 * We moves tha page into tail of inactive.
 		 */
-		list_move_tail(&page->lru, &lruvec->lists[lru]);
+		add_page_to_lru_list_tail(page, lruvec, lru);
 		__count_vm_event(PGROTATED);
 	}
 
