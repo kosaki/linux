@@ -195,7 +195,6 @@ int add_to_swap(struct page *page, struct list_head *list)
 			__GFP_HIGH|__GFP_NOMEMALLOC|__GFP_NOWARN);
 
 	if (!err) {	/* Success */
-		SetPageDirty(page);
 		return 1;
 	} else {	/* -ENOMEM radix-tree allocation failure */
 		/*

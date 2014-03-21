@@ -1268,6 +1268,124 @@ static inline unsigned long zap_pud_range(struct mmu_gather *tlb,
 	return addr;
 }
 
+static unsigned long lazyfree_pte_range(struct mmu_gather *tlb,
+                               struct vm_area_struct *vma, pmd_t *pmd,
+                               unsigned long addr, unsigned long end)
+{
+       struct mm_struct *mm = tlb->mm;
+       spinlock_t *ptl;
+       pte_t *start_pte;
+       pte_t *pte;
+
+       start_pte = pte_offset_map_lock(mm, pmd, addr, &ptl);
+       pte = start_pte;
+       arch_enter_lazy_mmu_mode();
+       do {
+               struct page *page;
+               pte_t ptent = *pte;
+
+               if (pte_none(ptent))
+                       continue;
+
+               if (!pte_present(ptent))
+                       continue;
+
+               page = vm_normal_page(vma, addr, ptent);
+
+               BUG_ON(!PageAnon(page));
+
+               ptent = pte_mkold(ptent);
+               ptent = pte_mkclean(ptent);
+               set_pte_at(mm, addr, pte, ptent);
+               tlb_remove_tlb_entry(tlb, pte, addr);
+       } while (pte++, addr += PAGE_SIZE, addr != end);
+       arch_leave_lazy_mmu_mode();
+       pte_unmap_unlock(start_pte, ptl);
+
+       return addr;
+}
+
+static inline unsigned long lazyfree_pmd_range(struct mmu_gather *tlb,
+                               struct vm_area_struct *vma, pud_t *pud,
+                               unsigned long addr, unsigned long end)
+{
+       pmd_t *pmd;
+       unsigned long next;
+
+       pmd = pmd_offset(pud, addr);
+       do {
+               next = pmd_addr_end(addr, end);
+               if (pmd_trans_huge(*pmd)) {
+                       if (next - addr != HPAGE_PMD_SIZE) {
+#ifdef CONFIG_DEBUG_VM
+                               if (!rwsem_is_locked(&tlb->mm->mmap_sem)) {
+                                       pr_err("%s: mmap_sem is unlocked! addr=0x%lx end=0x%x vma->vm_start=0x%lx vma->vm_end=0x%lx\n",
+                                               __func__, addr, end,
+                                               vma->vm_start,
+                                               vma->vm_end);
+                                       BUG();
+                               }
+#endif
+                               split_huge_page_pmd(vma, addr, pmd);
+                       } else if (zap_huge_pmd(tlb, vma, pmd, addr))
+                               goto next;
+                       /* fall through */
+               }
+               /*
+                * Here there can be other concurrent MADV_DONTNEED or
+                * trans huge page faults running, and if the pmd is
+                * none or trans huge it can change under us. This is
+                * because MADV_DONTNEED holds the mmap_sem in read
+                * mode.
+                */
+               if (pmd_none_or_trans_huge_or_clear_bad(pmd))
+                       goto next;
+               next = lazyfree_pte_range(tlb, vma, pmd, addr, next);
+next:
+               cond_resched();
+       } while (pmd++, addr = next, addr != end);
+
+       return addr;
+}
+
+static inline unsigned long lazyfree_pud_range(struct mmu_gather *tlb,
+                               struct vm_area_struct *vma, pgd_t *pgd,
+                               unsigned long addr, unsigned long end)
+{
+       pud_t *pud;
+       unsigned long next;
+
+       pud = pud_offset(pgd, addr);
+       do {
+               next = pud_addr_end(addr, end);
+               if (pud_none_or_clear_bad(pud))
+                       continue;
+               next = lazyfree_pmd_range(tlb, vma, pud, addr, next);
+       } while (pud++, addr = next, addr != end);
+
+       return addr;
+}
+
+static void lazyfree_page_range(struct mmu_gather *tlb,
+                            struct vm_area_struct *vma,
+                            unsigned long addr, unsigned long end)
+{
+       pgd_t *pgd;
+       unsigned long next;
+
+       BUG_ON(addr >= end);
+       tlb_start_vma(tlb, vma);
+       pgd = pgd_offset(vma->vm_mm, addr);
+       do {
+               next = pgd_addr_end(addr, end);
+               if (pgd_none_or_clear_bad(pgd))
+                       continue;
+               next = lazyfree_pud_range(tlb, vma, pgd, addr, next);
+       } while (pgd++, addr = next, addr != end);
+       tlb_end_vma(tlb, vma);
+}
+
+
 static void unmap_page_range(struct mmu_gather *tlb,
 			     struct vm_area_struct *vma,
 			     unsigned long addr, unsigned long end,
@@ -1293,6 +1411,22 @@ static void unmap_page_range(struct mmu_gather *tlb,
 	mem_cgroup_uncharge_end();
 }
 
+static void lazyfree_single_vma(struct mmu_gather *tlb,
+               struct vm_area_struct *vma, unsigned long start_addr,
+               unsigned long end_addr)
+{
+      unsigned long start = max(vma->vm_start, start_addr);
+       unsigned long end;
+
+       if (start >= vma->vm_end)
+               return;
+       end = min(vma->vm_end, end_addr);
+       if (end <= vma->vm_start)
+               return;
+
+       if (start != end)
+               lazyfree_page_range(tlb, vma, start, end);
+}
 
 static void unmap_single_vma(struct mmu_gather *tlb,
 		struct vm_area_struct *vma, unsigned long start_addr,
@@ -1366,6 +1500,28 @@ void unmap_vmas(struct mmu_gather *tlb,
 		unmap_single_vma(tlb, vma, start_addr, end_addr, NULL);
 	mmu_notifier_invalidate_range_end(mm, start_addr, end_addr);
 }
+
+/*
+ * Most of code would be shared with zap_page_range.
+ * Will address later.
+ */
+void lazyfree_range(struct vm_area_struct *vma, unsigned long start,
+               unsigned long size)
+{
+       struct mm_struct *mm = vma->vm_mm;
+       struct mmu_gather tlb;
+       unsigned long end = start + size;
+
+       lru_add_drain();
+       tlb_gather_mmu(&tlb, mm, start, end);
+       update_hiwater_rss(mm);
+       mmu_notifier_invalidate_range_start(mm, start, end);
+       for ( ; vma && vma->vm_start < end; vma = vma->vm_next)
+               lazyfree_single_vma(&tlb, vma, start, end);
+       mmu_notifier_invalidate_range_end(mm, start, end);
+       tlb_finish_mmu(&tlb, start, end);
+}
+
 
 /**
  * zap_page_range - remove user pages in a given range
@@ -3119,7 +3275,7 @@ static int do_swap_page(struct mm_struct *mm, struct vm_area_struct *vma,
 	dec_mm_counter_fast(mm, MM_SWAPENTS);
 	pte = mk_pte(page, vma->vm_page_prot);
 	if ((flags & FAULT_FLAG_WRITE) && reuse_swap_page(page)) {
-		pte = maybe_mkwrite(pte_mkdirty(pte), vma);
+		pte = maybe_mkwrite(pte, vma);
 		flags &= ~FAULT_FLAG_WRITE;
 		ret |= VM_FAULT_WRITE;
 		exclusive = 1;
@@ -3128,6 +3284,9 @@ static int do_swap_page(struct mm_struct *mm, struct vm_area_struct *vma,
 	if (pte_swp_soft_dirty(orig_pte))
 		pte = pte_mksoft_dirty(pte);
 	set_pte_at(mm, address, page_table, pte);
+	/* Make pte dirty to prevent purge the page without swapping. */
+	set_pte_at(mm, address, page_table, pte_mkdirty(pte));
+
 	if (page == swapcache)
 		do_page_add_anon_rmap(page, vma, address, exclusive);
 	else /* ksm created a completely new copy */
