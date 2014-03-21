@@ -1298,6 +1298,7 @@ static unsigned long lazyfree_pte_range(struct mmu_gather *tlb,
                ptent = pte_mkclean(ptent);
                set_pte_at(mm, addr, pte, ptent);
                tlb_remove_tlb_entry(tlb, pte, addr);
+	       deactivate_page(page);
        } while (pte++, addr += PAGE_SIZE, addr != end);
        arch_leave_lazy_mmu_mode();
        pte_unmap_unlock(start_pte, ptl);
